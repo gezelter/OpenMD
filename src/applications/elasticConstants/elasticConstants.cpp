@@ -48,10 +48,6 @@
 #include <string>
 #include <map>
 #include <fstream>
-#include <algorithm>
-#include <numeric>
-#include <vector>
-#include <iomanip>
 
 #include "elasticConstantsCmd.hpp"
 #include "brains/Register.hpp"
@@ -69,7 +65,47 @@
 #include "math/LU.hpp"
 #include "math/DynamicRectMatrix.hpp"
 
+
 using namespace OpenMD;
+#include <algorithm>
+#include <iostream>
+#include <numeric>
+#include <vector>
+#include <iomanip>
+
+
+template<typename Real>
+class Vector6 : public Vector<Real, 6>{
+public:
+  typedef Real ElemType;
+  typedef Real* ElemPoinerType;
+  Vector6() : Vector<Real, 6>(){}
+  
+  /** Constructs and initializes a Vector6d from individual coordinates */
+  inline Vector6( RealType v0, RealType v1, RealType v2, RealType v3,
+                  RealType v4, RealType v5) {
+    this->data_[0] = v0;
+    this->data_[1] = v1;
+    this->data_[2] = v2;
+    this->data_[3] = v3;
+    this->data_[4] = v4;
+    this->data_[5] = v5;
+  }
+  /** Constructs and initializes from an array*/
+  inline Vector6(Real* array) : Vector<Real, 6>(array) {}
+  
+  inline Vector6(const Vector<Real, 6>& v) : Vector<Real, 6>(v) {}
+  
+  inline Vector6<Real>& operator = (const Vector<Real, 6>& v) {
+    if (this == &v) { return *this; }
+    Vector<Real, 6>::operator=(v);
+    return *this;
+  }
+
+};
+  
+  
+typedef Vector6<RealType> Vector6d;
 
 RealType slope(const std::vector<RealType>& x, const std::vector<RealType>& y) {  
   const size_t n    = x.size();  
@@ -81,24 +117,25 @@ RealType slope(const std::vector<RealType>& x, const std::vector<RealType>& y) {
   return a;
 }
 
-// We might need this for Green-Lagrange strains
 void quadraticFit(const std::vector<RealType>& x,
                   const std::vector<RealType>& y,
                   RealType& a, RealType& b, RealType& c) {
-
+  
   RealType s00 = RealType(x.size());
   RealType s10(0.0), s20(0.0), s30(0.0), s40(0.0);
   RealType s01(0.0), s11(0.0), s21(0.0);
   
   for (size_t i = 0; i < x.size(); i++) {
+    std::cerr << x[i] << "\t" << y[i] << "\n";
     s10 += x[i];
     s20 += pow(x[i], 2);
     s30 += pow(x[i], 3);
     s40 += pow(x[i], 4);
     s01 += y[i];
     s11 += x[i]*y[i];
-    s21 += pow(x[i], 2) * y[i];
+    s21 += pow(x[i],2) * y[i];
   }
+  std::cerr << "&\n";
 
   RealType D = (s40 * (s20 * s00 - s10 * s10) - 
                 s30 * (s30 * s00 - s10 * s20) + 
@@ -107,7 +144,7 @@ void quadraticFit(const std::vector<RealType>& x,
   a = (s21*(s20 * s00 - s10 * s10) - 
        s11*(s30 * s00 - s10 * s20) + 
        s01*(s30 * s10 - s20 * s20)) / D;
-
+  
   b = (s40*(s11 * s00 - s01 * s10) - 
        s30*(s21 * s00 - s01 * s20) + 
        s20*(s21 * s10 - s11 * s20)) / D;
@@ -301,12 +338,12 @@ void writeMaterialProperties(DynamicRectMatrix<RealType> C,
   RealType kT_111 = (C11 - C12 + C44) / 3.0;
    
 }
-
 int main(int argc, char *argv []) {
-    
-  gengetopt_args_info args_info;
+  std::string method;
   std::string inputFileName;
   std::string outputFileName;
+
+  gengetopt_args_info args_info;
 
   // parse command line arguments
   if (cmdline_parser(argc, argv, &args_info) != 0) {
@@ -330,9 +367,69 @@ int main(int argc, char *argv []) {
     }
   }
 
+  method = "energy";
+  if (args_info.method_given) {    
+    method = args_info.method_arg;
+    toLower(method);
+  }  
 
   int nMax = args_info.npoints_arg;
-  RealType delta = args_info.delta_arg;
+  
+  std::vector<Vector6d > Ls;
+  Ls.push_back(Vector6d( 1., 1., 1., 0., 0., 0.));
+  Ls.push_back(Vector6d( 1., 0., 0., 0., 0., 0.));
+  Ls.push_back(Vector6d( 0., 1., 0., 0., 0., 0.));
+  Ls.push_back(Vector6d( 0., 0., 1., 0., 0., 0.));
+  Ls.push_back(Vector6d( 0., 0., 0., 2., 0., 0.));
+  Ls.push_back(Vector6d( 0., 0., 0., 0., 2., 0.));
+  Ls.push_back(Vector6d( 0., 0., 0., 0., 0., 2.));
+  Ls.push_back(Vector6d( 1., 1., 0., 0., 0., 0.));
+  Ls.push_back(Vector6d( 1., 0., 1., 0., 0., 0.));
+  Ls.push_back(Vector6d( 1., 0., 0., 2., 0., 0.));
+  Ls.push_back(Vector6d( 1., 0., 0., 0., 2., 0.));
+  Ls.push_back(Vector6d( 1., 0., 0., 0., 0., 2.));
+  Ls.push_back(Vector6d( 0., 1., 1., 0., 0., 0.));
+  Ls.push_back(Vector6d( 0., 1., 0., 2., 0., 0.));
+  Ls.push_back(Vector6d( 0., 1., 0., 0., 2., 0.));
+  Ls.push_back(Vector6d( 0., 1., 0., 0., 0., 2.));
+  Ls.push_back(Vector6d( 0., 0., 1., 2., 0., 0.));
+  Ls.push_back(Vector6d( 0., 0., 1., 0., 2., 0.));
+  Ls.push_back(Vector6d( 0., 0., 1., 0., 0., 2.));
+  Ls.push_back(Vector6d( 0., 0., 0., 2., 2., 0.));
+  Ls.push_back(Vector6d( 0., 0., 0., 2., 0., 2.));
+  Ls.push_back(Vector6d( 0., 0., 0., 0., 2., 2.));
+  Ls.push_back(Vector6d( 0., 0., 0., 2., 2., 2.));
+  Ls.push_back(Vector6d(-1., .5, .5, 0., 0., 0.));
+  Ls.push_back(Vector6d( .5,-1., .5, 0., 0., 0.));
+  Ls.push_back(Vector6d( .5, .5,-1., 0., 0., 0.));
+  Ls.push_back(Vector6d( 1.,-1., 0., 0., 0., 0.));
+  Ls.push_back(Vector6d( 1.,-1., 0., 0., 0., 2.));
+  Ls.push_back(Vector6d( 0., 1.,-1., 0., 0., 2.));
+  Ls.push_back(Vector6d( .5, .5,-1., 0., 0., 2.));
+  Ls.push_back(Vector6d( 1., 0., 0., 2., 2., 0.));
+  Ls.push_back(Vector6d( 1., 1.,-1., 0., 0., 0.));
+  Ls.push_back(Vector6d( 1., 1., 1.,-2.,-2.,-2.));
+  Ls.push_back(Vector6d( .5, .5,-1., 2., 2., 2.));
+  Ls.push_back(Vector6d( 0., 0., 0., 2., 2., 4.));
+  Ls.push_back(Vector6d( 1., 2., 3., 4., 5., 6.));
+  Ls.push_back(Vector6d(-2., 1., 4.,-3., 6.,-5.));
+  Ls.push_back(Vector6d( 3.,-5.,-1., 6., 2.,-4.));
+  Ls.push_back(Vector6d(-4.,-6., 5., 1.,-3., 2.));
+  Ls.push_back(Vector6d( 5., 4., 6.,-2.,-1.,-3.));
+  Ls.push_back(Vector6d(-6., 3.,-2., 5.,-4., 1.));
+  
+  std::vector<int> Lag_strain_list;
+  
+  if (method == "energy") {
+    for (int i = 1; i < 22; i++) {
+      Lag_strain_list.push_back(i);   
+    }
+  } else {
+    for (int i = 35; i < 42; i++) {
+      Lag_strain_list.push_back(i);
+    }
+  }
+          
   
   // Parse the input file, set up the system, and read the last frame:
   SimCreator creator;
@@ -370,18 +467,16 @@ int main(int argc, char *argv []) {
   Mat3x3d ptRef = thermo.getPressureTensor();
   ptRef.negate();
   ptRef *= Constants::elasticConvert;
-  Vector<RealType, 6> stressRef = ptRef.toVoigtTensor();
+  Vector6d stressRef = ptRef.toVoigtTensor();
     
-  Vector<RealType, 6> stress(0.0);
-  Vector<RealType, 6> strain(0.0);
-  Vector<RealType, 6> Fvoigt(0.0);
-  Mat3x3d F(0.0);  // Deformation Gradients
-  Mat3x3d E(0.0);  // Strain Tensor
+  Vector6d stress(0.0);
+  Vector6d strain(0.0);
+  Mat3x3d epsilon(0.0);
 
   std::vector<std::vector<RealType> > stressStrain;
   stressStrain.resize(6);
-  std::vector<std::vector<RealType> > strainValues;
-  strainValues.resize(6);
+  std::vector<RealType> strainValues;
+  std::vector<RealType> energyValues;
   DynamicRectMatrix<RealType> C(6, 6, 0.0);
   DynamicRectMatrix<RealType> S(6, 6, 0.0);
   
@@ -389,72 +484,113 @@ int main(int argc, char *argv []) {
   SimInfo::MoleculeIterator miter;
   Molecule * mol;
   RealType de;
-  Vector3d dr;
-  RealType a, b, c;
-  
-  for (int i = 0; i < 6; i++) {
-    
-    Fvoigt *= 0.0;
+  Vector3d delta;
 
-    for (int j=0; j < 6; j++) {
-      stressStrain[j].clear();
-      strainValues[j].clear();
-    }
+  Vector6d Ls_list;
+  Vector6d L(0.0);
+  Mat3x3d eta(0.0);
+  Mat3x3d eps(0.0);
+  Mat3x3d x(0.0);
+  Mat3x3d test(0.0);
+  Mat3x3d deformation(0.0);
+  std::vector<RealType> A2;
+  RealType norm;
+  RealType a, b, c;
+
+  for(std::vector<int>::iterator it = Lag_strain_list.begin();
+      it !=  Lag_strain_list.end(); ++it) {
+    
+    Ls_list = Ls[*it];
+
+    // std::cerr << "doing deformation " << Ls_list << "\n";
     
     for (int n = 0; n < nMax; n++) {
 
-      de = delta * ( RealType(n) / RealType(nMax-1)  - 0.5);
-      
-      Fvoigt[i] = de;
+      de = -0.005 + 0.01 * RealType(n) / RealType(nMax-1);
 
-      // We'll do this in the infinitessimal strain limit with a symmetric
-      // deformation gradient (F):
-      F.setupVoigtTensor(Fvoigt);
-      F += SquareMatrix3<RealType>::identity();
+      L = Ls_list;
+      L *= de;
+      eta.setupVoigtTensor(L[0], L[1], L[2], L[3]/2., L[4]/2., L[5]/2.);
+      norm = 1.0;
+      eps = eta;
+      if (eta.frobeniusNorm() > 0.7) {
+        std::cerr << "Too large deformation!\n";
+      }
 
-      // Infinitessimal strain tensor:
-      E = 0.5 * (F.transpose() + F) - SquareMatrix3<RealType>::identity();
-
+      while (norm > 1.0e-10) {
+        x = eta - eps*eps / 2.0;
+        test = x - eps;
+        norm = test.frobeniusNorm();       
+        eps = x;
+      }
+      deformation = SquareMatrix3<RealType>::identity() + eps;
+     
       info->getSnapshotManager()->advance();      
       
       for (mol = info->beginMolecule(miter); mol != NULL; 
            mol = info->nextMolecule(miter)) {
         pos = mol->getCom();
-        dr = F * pos;
-        mol->moveCom(dr - pos);
+        delta = deformation * pos;
+        mol->moveCom(delta - pos);
       }
 
-      Mat3x3d Hmat =  F * refHmat;
+      Mat3x3d Hmat = deformation * refHmat;
       snap->setHmat(Hmat);
       
       shake->constraintR();
       forceMan->calcForces();
       if (hasFlucQ) flucQ->applyConstraints();
       shake->constraintF();
-      
-      Mat3x3d pt = thermo.getPressureTensor();
-      pt.negate();
-      pt *= Constants::elasticConvert;
-      stress = pt.toVoigtTensor();
-      strain = E.toVoigtTensor();
 
-      for (int j = 0; j < 6; j++) {
-        stressStrain[j].push_back(stress[j]);
-        strainValues[j].push_back(strain[j]);
-      }
-      
-      info->getSnapshotManager()->resetToPrevious();
+      RealType energy = thermo.getPotential();
+
+      strainValues.push_back(de);
+      energyValues.push_back(energy);
     }
-    
-    for (int j = 0; j < 6; j++) {
-      if (i < 3) {
-        C(j, i) = slope(strainValues[i], stressStrain[j]);
-      } else {
-        C(j, i) = 0.5 * slope(strainValues[i], stressStrain[j]);
-      }
-    }        
+    quadraticFit(strainValues, energyValues, a, b, c);
+    A2.push_back( c );
   }
+
+
+  C(0,0) = 2.*A2[0];
+  C(0,1) = 1.*(-A2[0]-A2[1]+A2[6]);
+  C(0,2) = 1.*(-A2[0]-A2[2]+A2[7]);
+  C(0,3) = .5*(-A2[0]-A2[3]+A2[8]) ;
+  C(0,4) = .5*(-A2[0]+A2[9]-A2[4]);
+  C(0,5) = .5*(-A2[0]+A2[10]-A2[5]);
+  C(1,1) = 2.*A2[1];
+  C(1,2) = 1.*(A2[11]-A2[1]-A2[2]);
+  C(1,3) = .5*(A2[12]-A2[1]-A2[3]);
+  C(1,4) = .5*(A2[13]-A2[1]-A2[4]);
+  C(1,5) = .5*(A2[14]-A2[1]-A2[5]);
+  C(2,2) = 2.*A2[2] ;
+  C(2,3) = .5*(A2[15]-A2[2]-A2[3]);
+  C(2,4) = .5*(A2[16]-A2[2]-A2[4]);
+  C(2,5) = .5*(A2[17]-A2[2]-A2[5]);
+  C(3,3) = .5*A2[3];
+  C(3,4) = .25*(A2[18]-A2[3]-A2[4]);
+  C(3,5) = .25*(A2[19]-A2[3]-A2[5]);
+  C(4,4) = .5*A2[4];
+  C(4,5) = .25*(A2[20]-A2[4]-A2[5]);
+  C(5,5) = .5*A2[5];
   
+        
+  //     Mat3x3d pt = thermo.getPressureTensor();
+  //     pt.negate();
+  //     pt *= Constants::elasticConvert;
+  //     stress = pt.toVoigtTensor();
+
+  //     for (int j = 0; j < 6; j++) {
+  //       stressStrain[j].push_back(stress[j]);
+  //     }
+      
+  //     info->getSnapshotManager()->resetToPrevious();
+  //   }
+  //   for (int j = 0; j < 6; j++) {
+  //     C(i,j) = slope(strainValues, stressStrain[j]);
+  //   }
+  // }
+
   // Symmetrize C:
 
   for (int i = 0; i < 5; i++) {
@@ -469,8 +605,6 @@ int main(int argc, char *argv []) {
   DynamicRectMatrix<RealType> tmpMat(C);
   invertMatrix(tmpMat, S);
 
-  std::cout << "You can paste the elastic tensor into ELATE at "
-            << "http://progs.coudert.name/elate" << std::endl;
   writeMatrix(C, "Elastic Tensor", "GPa");
   writeMatrix(S, "Compliance Tensor", "GPa^-1");
   
