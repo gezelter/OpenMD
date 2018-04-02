@@ -126,7 +126,7 @@ void quadraticFit(const std::vector<RealType>& x,
   RealType s01(0.0), s11(0.0), s21(0.0);
   
   for (size_t i = 0; i < x.size(); i++) {
-    std::cerr << x[i] << "\t" << y[i] << "\n";
+    // std::cerr << x[i] << "\t" << y[i] << "\n";
     s10 += x[i];
     s20 += pow(x[i], 2);
     s30 += pow(x[i], 3);
@@ -135,7 +135,7 @@ void quadraticFit(const std::vector<RealType>& x,
     s11 += x[i]*y[i];
     s21 += pow(x[i],2) * y[i];
   }
-  std::cerr << "&\n";
+  // std::cerr << "&\n";
 
   RealType D = (s40 * (s20 * s00 - s10 * s10) - 
                 s30 * (s30 * s00 - s10 * s20) + 
@@ -374,6 +374,8 @@ int main(int argc, char *argv []) {
   }  
 
   int nMax = args_info.npoints_arg;
+
+  RealType dmax = args_info.delta_arg;
   
   std::vector<Vector6d > Ls;
   Ls.push_back(Vector6d( 1., 1., 1., 0., 0., 0.));
@@ -420,7 +422,7 @@ int main(int argc, char *argv []) {
   
   std::vector<int> Lag_strain_list;
   
-  if (method == "energy") {
+  if (!method.compare("energy")) {
     for (int i = 1; i < 22; i++) {
       Lag_strain_list.push_back(i);   
     }
@@ -465,10 +467,11 @@ int main(int argc, char *argv []) {
   veloSet->removeComDrift();
   forceMan->calcForces();
   Mat3x3d ptRef = thermo.getPressureTensor();
+  RealType V0 = thermo.getVolume();
   ptRef.negate();
   ptRef *= Constants::elasticConvert;
   Vector6d stressRef = ptRef.toVoigtTensor();
-    
+  
   Vector6d stress(0.0);
   Vector6d strain(0.0);
   Mat3x3d epsilon(0.0);
@@ -496,6 +499,9 @@ int main(int argc, char *argv []) {
   std::vector<RealType> A2;
   RealType norm;
   RealType a, b, c;
+  RealType energy;
+  Mat3x3d pressureTensor;
+  
 
   for(std::vector<int>::iterator it = Lag_strain_list.begin();
       it !=  Lag_strain_list.end(); ++it) {
@@ -503,10 +509,12 @@ int main(int argc, char *argv []) {
     Ls_list = Ls[*it];
 
     // std::cerr << "doing deformation " << Ls_list << "\n";
+    strainValues.clear();
+    energyValues.clear();
     
     for (int n = 0; n < nMax; n++) {
 
-      de = -0.005 + 0.01 * RealType(n) / RealType(nMax-1);
+      de = -0.5*dmax + dmax * RealType(n) / RealType(nMax-1);
 
       L = Ls_list;
       L *= de;
@@ -542,39 +550,60 @@ int main(int argc, char *argv []) {
       if (hasFlucQ) flucQ->applyConstraints();
       shake->constraintF();
 
-      RealType energy = thermo.getPotential();
+      if (!method.compare("energy")) {
+        energy = thermo.getPotential();
+        energyValues.push_back(energy);
 
+      } else {
+        pressureTensor = thermo.getPressureTensor();
+        pressureTensor.negate();
+        pressureTensor *= Constants::elasticConvert;
+        stress = pressureTensor.toVoigtTensor();
+
+        for (int j = 0; j < 6; j++) {
+          stressStrain[j].push_back(stress[j]);
+        }
+
+      }
+      
       strainValues.push_back(de);
-      energyValues.push_back(energy);
+      info->getSnapshotManager()->resetToPrevious();
+
     }
-    quadraticFit(strainValues, energyValues, a, b, c);
-    A2.push_back( c );
+
+    if (!method.compare("energy")) {
+      quadraticFit(strainValues, energyValues, a, b, c);
+      A2.push_back( a * Constants::energyElasticConvert / V0 );
+    } else {
+    }
   }
 
 
-  C(0,0) = 2.*A2[0];
-  C(0,1) = 1.*(-A2[0]-A2[1]+A2[6]);
-  C(0,2) = 1.*(-A2[0]-A2[2]+A2[7]);
-  C(0,3) = .5*(-A2[0]-A2[3]+A2[8]) ;
-  C(0,4) = .5*(-A2[0]+A2[9]-A2[4]);
-  C(0,5) = .5*(-A2[0]+A2[10]-A2[5]);
-  C(1,1) = 2.*A2[1];
-  C(1,2) = 1.*(A2[11]-A2[1]-A2[2]);
-  C(1,3) = .5*(A2[12]-A2[1]-A2[3]);
-  C(1,4) = .5*(A2[13]-A2[1]-A2[4]);
-  C(1,5) = .5*(A2[14]-A2[1]-A2[5]);
-  C(2,2) = 2.*A2[2] ;
-  C(2,3) = .5*(A2[15]-A2[2]-A2[3]);
-  C(2,4) = .5*(A2[16]-A2[2]-A2[4]);
-  C(2,5) = .5*(A2[17]-A2[2]-A2[5]);
-  C(3,3) = .5*A2[3];
-  C(3,4) = .25*(A2[18]-A2[3]-A2[4]);
-  C(3,5) = .25*(A2[19]-A2[3]-A2[5]);
-  C(4,4) = .5*A2[4];
-  C(4,5) = .25*(A2[20]-A2[4]-A2[5]);
-  C(5,5) = .5*A2[5];
-  
-        
+  if (!method.compare("energy")) {
+    C(0,0) = 2.*A2[0];
+    C(0,1) = 1.*(-A2[0]-A2[1]+A2[6]);
+    C(0,2) = 1.*(-A2[0]-A2[2]+A2[7]);
+    C(0,3) = .5*(-A2[0]-A2[3]+A2[8]) ;
+    C(0,4) = .5*(-A2[0]+A2[9]-A2[4]);
+    C(0,5) = .5*(-A2[0]+A2[10]-A2[5]);
+    C(1,1) = 2.*A2[1];
+    C(1,2) = 1.*(A2[11]-A2[1]-A2[2]);
+    C(1,3) = .5*(A2[12]-A2[1]-A2[3]);
+    C(1,4) = .5*(A2[13]-A2[1]-A2[4]);
+    C(1,5) = .5*(A2[14]-A2[1]-A2[5]);
+    C(2,2) = 2.*A2[2] ;
+    C(2,3) = .5*(A2[15]-A2[2]-A2[3]);
+    C(2,4) = .5*(A2[16]-A2[2]-A2[4]);
+    C(2,5) = .5*(A2[17]-A2[2]-A2[5]);
+    C(3,3) = .5*A2[3];
+    C(3,4) = .25*(A2[18]-A2[3]-A2[4]);
+    C(3,5) = .25*(A2[19]-A2[3]-A2[5]);
+    C(4,4) = .5*A2[4];
+    C(4,5) = .25*(A2[20]-A2[4]-A2[5]);
+    C(5,5) = .5*A2[5];
+  }
+    
+    
   //     Mat3x3d pt = thermo.getPressureTensor();
   //     pt.negate();
   //     pt *= Constants::elasticConvert;
