@@ -64,7 +64,11 @@
 #include "math/SquareMatrix3.hpp"
 #include "math/LU.hpp"
 #include "math/DynamicRectMatrix.hpp"
-
+#include "optimization/OptimizationFactory.hpp"
+#include "optimization/Method.hpp"
+#include "optimization/Constraint.hpp"
+#include "optimization/Problem.hpp"
+#include "optimization/BoxObjectiveFunction.hpp"
 
 using namespace OpenMD;
 #include <algorithm>
@@ -431,8 +435,11 @@ int main(int argc, char *argv []) {
       Lag_strain_list.push_back(i);
     }
   }
-          
-  
+
+
+  //register forcefields, integrators and minimizers
+  registerAll();
+
   // Parse the input file, set up the system, and read the last frame:
   SimCreator creator;
   SimInfo* info = creator.createSim(inputFileName, true);
@@ -441,10 +448,6 @@ int main(int argc, char *argv []) {
   Velocitizer* veloSet = new Velocitizer(info);
 
   forceMan->initialize();
-  
-  Snapshot* snap = info->getSnapshotManager()->getCurrentSnapshot();
-  Mat3x3d refHmat = snap->getHmat();
-
   info->update();
   
   Shake* shake = new Shake(info);
@@ -465,6 +468,40 @@ int main(int argc, char *argv []) {
 
   // Just in case we were passed a system that is on the move:
   veloSet->removeComDrift();
+ 
+  std::cerr << "Volume before = " << thermo.getVolume();
+
+  MinimizerParameters* miniPars = simParams->getMinimizerParameters();
+  OptimizationMethod* minim =OptimizationFactory::getInstance()->createOptimization(toUpperCopy(miniPars->getMethod()), info);
+  
+  if (minim == NULL) {
+    sprintf(painCave.errMsg,
+            "Optimization Factory can not create %s OptimizationMethod\n",
+            miniPars->getMethod().c_str());
+    painCave.isFatal = 1;
+    simError();
+  }
+  
+  BoxObjectiveFunction boxObjf(info, forceMan); 
+  DumpStatusFunction dsf(info);
+  DynamicVector<RealType> initCoords = boxObjf.setInitialCoords();
+  Problem problem(boxObjf, *(new NoConstraint()), dsf, initCoords);
+    
+  int maxIter = miniPars->getMaxIterations();
+  int mssIter = miniPars->getMaxStationaryStateIterations();
+  RealType rEps = miniPars->getRootEpsilon();
+  RealType fEps = miniPars->getFunctionEpsilon();
+  RealType gnEps = miniPars->getGradientNormEpsilon();
+  
+  EndCriteria endCriteria(maxIter, mssIter, rEps, fEps, gnEps); 
+
+  minim->minimize(problem, endCriteria);
+  delete minim;
+
+  std::cerr << "Volume after = " << thermo.getVolume();
+  Snapshot* snap = info->getSnapshotManager()->getCurrentSnapshot();
+  Mat3x3d refHmat = snap->getHmat();
+
   forceMan->calcForces();
   Mat3x3d ptRef = thermo.getPressureTensor();
   RealType V0 = thermo.getVolume();
